@@ -11,8 +11,21 @@ def main() -> None:
     demo_mode = demo.add_mutually_exclusive_group()
     demo_mode.add_argument("--reject", action="store_true", help="exercise rejection; no artifact is written")
     demo_mode.add_argument("--dry-run", action="store_true", help="exercise approved workflow without writing an artifact")
+    serve=sub.add_parser("serve", help="run the localhost-only deterministic demo HTTP API")
+    serve.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1",), help="loopback bind address only")
+    serve.add_argument("--port", type=int, default=8765, help="TCP port from 1 to 65535 (default: 8765)")
+    serve.add_argument("--data-dir", default=".agos-local-api", help="local directory for append-only API activity")
     args=parser.parse_args()
     if args.command=="events": print(json.dumps(SQLiteStateStore(args.database).events(args.run_id),indent=2))
+    if args.command=="serve":
+        if not 1 <= args.port <= 65535:
+            parser.error("--port must be between 1 and 65535")
+        from .api import serve
+        try:
+            from pathlib import Path
+            serve(args.host, args.port, Path(args.data_dir) / "activity.jsonl")
+        except ValueError as exc:
+            parser.error(str(exc))
     if args.command=="research-to-publish-demo":
         from pathlib import Path
         from .research_to_publish import SourceFixture, build_workflow, register_local_workflow

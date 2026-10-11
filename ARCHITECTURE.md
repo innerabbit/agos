@@ -35,6 +35,7 @@ schema ──> storage <── runtime ──> registry/providers/memory
 | `sources.py` | Source connector contract | Strict fixture/fake connectors plus an opt-in, credential-free HTTPS connector using exact host/source allowlists, public-IP validation, redirect revalidation, DNS-pinned TLS, and bounded responses. |
 | `publishing.py` | Markdown publication boundary | Request validation, dry-run/local adapters, and injected GitHub client/credential contracts. |
 | `config.py` | Environment-derived local settings | Validates SQLite state/memory and local execution only. |
+| `api.py` | Local demo HTTP boundary | Stdlib localhost-only API for fixed demo state, explicit review actions, dry-run receipts, and server-lifetime append-only history. |
 
 ## Workflow and execution contract
 
@@ -103,7 +104,15 @@ AGOS_EXECUTION_BACKEND=local
 
 Any other backend choice—including Postgres or a queue—is rejected with `ConfigurationError`. `AGOS_ENV` accepts `local`, `staging`, and `production` labels, but those labels do not provision an environment or alter the implemented local topology.
 
-The files under `deploy/` build an image for the CLI/tests and provide optional local Compose commands. They do not expose an HTTP API or start workers. See [DEPLOYMENT.md](DEPLOYMENT.md) for production prerequisites that are **planned**, not implemented.
+The files under `deploy/` build an image for the CLI/tests and provide optional local Compose commands. They do not expose an HTTP API or start workers. The `agos serve` CLI command is a separate, direct localhost-only development server, not a deployment topology. See [DEPLOYMENT.md](DEPLOYMENT.md) for production prerequisites that are **planned**, not implemented.
+
+## Local HTTP demo boundary
+
+`agos serve` binds to `127.0.0.1:8765` by default and refuses non-loopback bind addresses before it opens a socket. It exposes only fixed deterministic demo data: `GET /healthz`, `GET /v1/demo`, `POST /v1/demo/review/approve`, `POST /v1/demo/review/reject`, `POST /v1/demo/dry-run`, and `GET /v1/demo/history`. Review actions require an exact empty JSON object; dry-run requires a preceding explicit approval.
+
+The API constructs its own fixture and deterministic-provider inputs. It accepts no credentials, URLs, output directories, arbitrary workflow definitions, or publishing options. Dry-run registers only `DryRunMarkdownPublisher`, so it writes no artifact and has no network or external-publication effect. With `--data-dir`, ordered activity is appended locally as JSONL and is retained across restarts; it remains a local development feed, not an audit-retention system.
+
+The handler caps request bodies at 8 KiB, requires JSON for POST actions, rejects non-empty/unknown schemas, avoids request logging, sends `nosniff` and no-store headers, and applies CORS only to `http://127.0.0.1:3000` (Studio) or the same API port, without credentials. Originless same-machine CLI requests remain supported; non-loopback browser origins are rejected.
 
 ## Extension points and non-claims
 

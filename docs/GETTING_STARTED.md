@@ -41,6 +41,27 @@ PYTHONPATH=src python3 -m agos.cli research-to-publish-demo --reject --output-di
 
 Here the approval decision is `rejected`, the `publish` node is skipped, and no Markdown artifact is created.
 
+## Run the localhost demo HTTP API
+
+The server is intentionally a narrow, local-only demo surface; it does not submit arbitrary workflows, fetch sources, write artifacts, or publish externally.
+
+```sh
+PYTHONPATH=src python3 -m agos.cli serve
+```
+
+It binds to `127.0.0.1:8765` by default and refuses non-loopback bind addresses. In another terminal, inspect its initial state and approve the fixed demo before requesting a no-effect run:
+
+```sh
+curl http://127.0.0.1:8765/v1/demo
+curl -X POST http://127.0.0.1:8765/v1/demo/review/approve \
+  -H 'Content-Type: application/json' -d '{}'
+curl -X POST http://127.0.0.1:8765/v1/demo/dry-run \
+  -H 'Content-Type: application/json' -d '{}'
+curl http://127.0.0.1:8765/v1/demo/history
+```
+
+Use `POST /v1/demo/review/reject` with the same required `{}` body to record a rejection; dry-run then returns `409` until a new explicit approval. The history is ordered and append-only while the process runs, then resets on restart. POST bodies are capped at 8 KiB, must be UTF-8 JSON, and must be exactly `{}`—there are no fields for secrets, URLs, output paths, or publishing configuration. Browser CORS accepts only same-port loopback origins and no credentials.
+
 ## Use a file-backed local state store
 
 The demo CLI uses an in-memory state store. To retain run events and checkpoints, construct `Runtime` with `SQLiteStateStore` pointed at a local file in your application code. Then inspect events with:

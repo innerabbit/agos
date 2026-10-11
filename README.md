@@ -5,7 +5,7 @@
 AGOS is a small, dependency-free reference implementation—not a hosted platform. It validates serializable workflow graphs, invokes registered tools only through declared agent capabilities, and records local run state and events in SQLite.
 
 > [!IMPORTANT]
-> **Status — local vertical slice.** AGOS runs synchronously in one Python process. It has no HTTP API, queue, or worker processes. Fixture sources remain the default; an opt-in HTTPS research connector is available only through a separate capability, pre-registered source IDs, an explicit host allowlist, and a credential-free stdlib transport. Its opt-in GitHub Markdown publisher is an injected-client contract exercised only with deterministic fakes in this repository; it does not discover credentials or publish by itself.
+> **Status — local vertical slice.** AGOS runs synchronously in one Python process. It includes a narrow localhost-only HTTP API for deterministic demo state, explicit review decisions, dry-run receipts, and an append-only local JSONL history feed; it is not a production server or deployment topology. It has no queue or worker processes. Fixture sources remain the default; an opt-in HTTPS research connector is available only through a separate capability, pre-registered source IDs, an explicit host allowlist, and a credential-free stdlib transport. Its opt-in GitHub Markdown publisher is an injected-client contract exercised only with deterministic fakes in this repository; it does not discover credentials or publish by itself.
 
 ## Who it is for
 
@@ -21,8 +21,9 @@ It is **not** a production deployment, distributed scheduler, multi-tenant platf
 | Execution | Synchronous, single-process runtime with delegation limits and cooperative cancellation | Queue, workers, leases, distributed cancellation |
 | Tool access | Agent manifests and capability checks before registered-tool invocation | Process isolation and sandboxing |
 | State and memory | In-memory adapters and local SQLite checkpoints, events, idempotency results, and namespaces | Postgres, object storage, multi-host coordination |
-| Research-to-Publish | Fixture/fake sources by default; opt-in capability-scoped HTTPS retrieval with pre-registered IDs, exact host allowlist, public-IP validation, redirect revalidation, TLS-pinned stdlib transport, response/type caps, and digest provenance; deterministic draft, provenance review, explicit approval input, idempotent local Markdown artifact, and capability-scoped injected GitHub Markdown adapter | LLM clients, built-in credential handling, HTTP API, production connector |
-| Operations | Local CLI and Docker/Compose tooling for tests | HTTP API, remote telemetry, production topology |
+| Research-to-Publish | Fixture/fake sources by default; opt-in capability-scoped HTTPS retrieval with pre-registered IDs, exact host allowlist, public-IP validation, redirect revalidation, TLS-pinned stdlib transport, response/type caps, and digest provenance; deterministic draft, provenance review, explicit approval input, idempotent local Markdown artifact, and capability-scoped injected GitHub Markdown adapter | LLM clients, built-in credential handling, production connector |
+| HTTP demo API | Localhost-only server for deterministic demo state, explicit approve/reject actions, dry-run receipts, strict JSON validation, and append-only local history | General workflow submission, live sources, publishing, authentication, remote access |
+| Operations | Local CLI and Docker/Compose tooling for tests | Remote telemetry, production topology |
 
 Planned items are not available through configuration flags. See the [roadmap](docs/ROADMAP.md) for scope and priorities.
 
@@ -57,6 +58,27 @@ PYTHONPATH=src python3 -m agos.cli research-to-publish-demo --dry-run --output-d
 
 The dry-run receipt reports `target: "dry-run"`; it makes no network calls,
 does not publish externally, and writes no file.
+
+## Local HTTP demo API
+
+Start the dependency-free local server (it binds to `127.0.0.1:8765` by default and refuses non-loopback hosts):
+
+```sh
+PYTHONPATH=src python3 -m agos.cli serve
+```
+
+The API never accepts secrets, live-source parameters, output paths, or publisher settings. Every `POST` requires `Content-Type: application/json` and exactly `{}`. Pass `--data-dir .agos-local-api` to retain its append-only local JSONL feed across restarts. Available endpoints are:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/healthz` | Local health check |
+| `GET` | `/v1/demo` | Demo review state |
+| `POST` | `/v1/demo/review/approve` | Explicitly approve the demo review |
+| `POST` | `/v1/demo/review/reject` | Explicitly reject the demo review |
+| `POST` | `/v1/demo/dry-run` | Run the deterministic, no-write demo after approval |
+| `GET` | `/v1/demo/history` | Read ordered append-only local history |
+
+For browser use, CORS is restricted to `http://127.0.0.1:3000` (local Studio) and the same API port; no wildcard origins, credentials, arbitrary headers, or remote cross-origin requests are accepted. `dry-run` uses `DryRunMarkdownPublisher`, so it creates no artifact, sends no network request, and cannot publish externally.
 
 ## Canonical Research-to-Publish flow
 
@@ -138,6 +160,7 @@ PYTHONPATH=src python3 -m agos.cli events ./data/agos-state.db RUN_ID
 - [Roadmap](docs/ROADMAP.md) — current surface versus planned work.
 - [Deployment boundaries](DEPLOYMENT.md) — local tooling and production prerequisites.
 - [Testing and evaluation](docs/TESTING.md) — reproducible local checks and their limits.
+- [Local Studio API](docs/LOCAL_STUDIO_API.md) — exact two-process startup and safety boundary.
 - [Original MVP release checklist](docs/RELEASE_CHECKLIST.md) — release evidence versus production requirements.
 - [ADR 0001](docs/adr/0001-local-first-deployment-boundaries.md) — why unsupported backends are rejected.
 - [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
