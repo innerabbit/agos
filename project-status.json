@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "project": "agos",
+  "updated_at": "2026-10-11",
+  "status": "local_vertical_slice",
+  "implemented": {
+    "workflow_runtime": "single-process deterministic executor with local SQLite checkpoints and structured events",
+    "state_and_memory": "local SQLite implementations plus in-memory test adapters",
+    "execution_backend": "synchronous LocalExecutionBackend",
+    "configuration": "validated environment settings for implemented local backends",
+    "research_to_publish_mvp": "fixture-only source collection, provenance, deterministic draft and claim review, explicit human approval route, and idempotent local Markdown artifacts",
+    "demo": "agos research-to-publish-demo; it performs no network access or external publishing",
+    "container_template": "local CLI/test image only"
+  },
+  "planned": {
+    "http_api": "planned",
+    "worker_queue_and_leases": "planned",
+    "postgres_state_and_memory": "planned",
+    "object_storage": "planned",
+    "distributed_cancellation": "planned",
+    "remote_telemetry_export": "planned",
+    "notion_x_wordpress_publish_adapters": "planned; require explicit capability, credentials, egress controls, and human authorization",
+    "production_deployment": "planned"
+  },
+  "limitations": [
+    "No HTTP API, scheduler, queue, remote workers, external source fetching, or external publishing is implemented.",
+    "The canonical source adapter accepts deterministic fixtures only; it does not scrape or live-fetch.",
+    "Human approval is represented by an explicit workflow input in this local MVP; no interactive approval service is implemented.",
+    "SQLite is single-host storage and does not make tool side effects transactional or provide distributed exactly-once recovery.",
+    "The supplied container manifest is for local tooling, not a production topology."
+  ]
+}

@@ -1,0 +1,22 @@
+# Optional local tooling only; not a staging/production deployment manifest.
+services:
+  agos-tests:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    entrypoint: ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]
+    volumes:
+      - ../tests:/app/tests:ro
+  agos-events:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    profiles: ["tools"]
+    environment:
+      AGOS_ENV: local
+    volumes:
+      - agos-data:/data
+    # Supply a real database path and run id when invoking this one-off tool.
+    entrypoint: ["agos", "events"]
+volumes:
+  agos-data:
