@@ -8,7 +8,7 @@ AGOS is a **single-process, local Python vertical slice** for workflow-first age
 - Tools are invoked by registered name and only after a declared agent capability is checked.
 - State, events, idempotency results, and durable memory use local SQLite implementations when persistence is needed.
 - Unsupported backends are rejected in configuration rather than mapped to an implicit local fallback.
-- The canonical workflow has no network client, credential flow, live source adapter, or remote publisher.
+- The canonical workflow has no network client, credential lookup, or live source adapter. An opt-in GitHub-shaped Markdown publisher contract is dependency-injected and is exercised only with deterministic fakes.
 
 ## Component map
 
@@ -31,7 +31,9 @@ schema ──> storage <── runtime ──> registry/providers/memory
 | `memory.py` | Workflow memory | In-memory and SQLite implementations with `private:<agent>` and `shared:<scope>` namespace checks. |
 | `execution.py` | Submission/execution seam | `LocalExecutionBackend` directly delegates to `Runtime`; no queue/worker backend exists. |
 | `providers.py` | Provider seam | `DeterministicProvider`, a local fixture provider only. |
-| `research_to_publish.py` | Canonical example workflow | Fixture collection, deterministic draft, claim review, approval input, and local Markdown artifact creation. |
+| `research_to_publish.py` | Canonical example workflow | Fixture-default collection, deterministic draft, claim review, approval input, local Markdown artifacts, plus separately registered opt-in HTTPS and approved GitHub Markdown routes. |
+| `sources.py` | Source connector contract | Strict fixture/fake connectors plus an opt-in, credential-free HTTPS connector using exact host/source allowlists, public-IP validation, redirect revalidation, DNS-pinned TLS, and bounded responses. |
+| `publishing.py` | Markdown publication boundary | Request validation, dry-run/local adapters, and injected GitHub client/credential contracts. |
 | `config.py` | Environment-derived local settings | Validates SQLite state/memory and local execution only. |
 
 ## Workflow and execution contract
@@ -80,7 +82,8 @@ collect fixtures → synthesize deterministic draft → review provenance claims
                                               └─ rejected → publisher skipped
 ```
 
-- `FixtureSourceAdapter` returns only caller-supplied, allow-listed `SourceFixture` objects. It cannot scrape or live-fetch.
+- `FixtureSourceAdapter` returns only caller-supplied, allow-listed `SourceFixture` objects. It cannot scrape or live-fetch; this remains the default demo path.
+- `HTTPSResearchConnector` is separately registered through `register_https_workflow()` and requires the distinct `research.collect.https` capability. It accepts only pre-registered source IDs and exact HTTPS/443 hosts, resolves every initial and redirect destination, rejects non-public or mixed DNS results, pins the approved address for TLS, and caps time, response bytes, redirects, and content types. It sends no credentials, cookies, or caller headers; provenance records the normalized final URL, UTC timestamp, and SHA-256 digest. Its transport and resolver are injectable for deterministic, offline tests.
 - `DeterministicProvider` selects caller-provided local responses; it is not an LLM client.
 - `ClaimReviewTool` rejects approval when a claim lacks a collected provenance source ID.
 - `HumanApprovalGateTool` accepts an explicit `approved` or `rejected` input. The local MVP has no interactive approval service.
@@ -106,4 +109,4 @@ The files under `deploy/` build an image for the CLI/tests and provide optional 
 
 `StateStore`, `MemoryStore`, `ExecutionBackend`, `Provider`, and the registry/tool protocol are seams for future adapters. Their presence does not mean such adapters exist.
 
-Before adding a connector or remote publishing path, it should be separately registered, capability-scoped, explicitly authorized, and designed for credential handling, egress, idempotency, ambiguous outcomes, auditability, and target allow-listing. No such connector is included in this repository today.
+The GitHub-shaped publisher is separately registered and capability-scoped (`publish.github_markdown`). It requires a human-approved route, allow-listed `owner/repository`, traversal-safe Markdown path, successful runtime idempotency key, provenance digest, injected credential source, and injected contents client. AGOS never reads or stores a token and ships no HTTP client, so this repository cannot publish remotely by default. The fake integration tests are the only connector execution included here. A production connector still needs egress enforcement, ambiguous-outcome recovery, audit retention, and a real secret-reference design.

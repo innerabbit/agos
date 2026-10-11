@@ -6,7 +6,6 @@ a caller-selected local directory.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 import json
 import re
@@ -15,44 +14,19 @@ from typing import Literal
 from .manifests import AgentManifest
 from .memory import MemoryStore
 from .providers import Provider
+from .publishing import DryRunMarkdownPublisher, LocalMarkdownPublisher, MarkdownPublisher, PublicationRequest
 from .registry import CapabilityRegistry, ToolContext
 from .schema import Json, Node, Route, Workflow
+from .sources import AllowlistedFixtureConnector, HTTPSResearchConnector, HTTPSResearchSource, SourceConnector, SourceRecord
 
 ApprovalDecision = Literal["approved", "rejected"]
 
 
-@dataclass(frozen=True)
-class SourceFixture:
-    """A supplied, deterministic research source; this is not a fetch adapter."""
-
-    source_id: str
-    title: str
-    url: str
-    retrieved_at: str
-    content: str
-
-    def provenance(self) -> dict[str, str]:
-        return {
-            "source_id": self.source_id,
-            "title": self.title,
-            "url": self.url,
-            "retrieved_at": self.retrieved_at,
-            "content": self.content,
-            "adapter": "fixture",
-        }
+SourceFixture = SourceRecord
 
 
-class FixtureSourceAdapter:
-    """Returns allow-listed fixtures only; no scraping or live HTTP is possible."""
-
-    def __init__(self, fixtures: dict[str, SourceFixture]):
-        self._fixtures = dict(fixtures)
-
-    def collect(self, source_ids: list[str]) -> list[dict[str, str]]:
-        missing = [source_id for source_id in source_ids if source_id not in self._fixtures]
-        if missing:
-            raise ValueError(f"unknown fixture source ids: {missing}")
-        return [self._fixtures[source_id].provenance() for source_id in source_ids]
+class FixtureSourceAdapter(AllowlistedFixtureConnector):
+    """Compatibility name for the strict, fixture-only connector."""
 
 
 def _scope(context: ToolContext) -> str:
@@ -69,7 +43,7 @@ def _load(memory: MemoryStore, context: ToolContext, key: str) -> Json:
 class CollectSourcesTool:
     capability = "research.collect.fixture"
 
-    def __init__(self, adapter: FixtureSourceAdapter, memory: MemoryStore):
+    def __init__(self, adapter: SourceConnector, memory: MemoryStore):
         self.adapter, self.memory = adapter, memory
 
     def invoke(self, value: Json, context: ToolContext) -> Json:
@@ -81,6 +55,12 @@ class CollectSourcesTool:
         record: dict[str, Json] = {"brief": value["brief"], "sources": self.adapter.collect(source_ids)}
         self.memory.put(context.agent_id, _scope(context), "research", record)
         return {"source_count": len(record["sources"]), "provenance_recorded": True}
+
+
+class HTTPSCollectSourcesTool(CollectSourcesTool):
+    """Separate capability prevents HTTPS retrieval from inheriting fixture permission."""
+
+    capability = "research.collect.https"
 
 
 class SynthesizeDraftTool:
@@ -145,12 +125,13 @@ class HumanApprovalGateTool:
 
 
 class LocalMarkdownPublisherTool:
-    """Writes only a local Markdown file, and uses atomic create for idempotency."""
+    """Writes a local Markdown file, or reports a no-effect dry-run receipt."""
 
     capability = "publish.local_markdown"
 
-    def __init__(self, output_dir: str | Path, memory: MemoryStore):
+    def __init__(self, output_dir: str | Path, memory: MemoryStore, publisher: MarkdownPublisher | None = None):
         self.output_dir, self.memory = Path(output_dir), memory
+        self.publisher = publisher or LocalMarkdownPublisher(self.output_dir)
 
     def invoke(self, value: Json, context: ToolContext) -> Json:
         approval = _load(self.memory, context, "approval")
@@ -163,17 +144,37 @@ class LocalMarkdownPublisherTool:
         slug = str(brief["slug"])
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", slug):
             raise ValueError("brief slug must be a safe lowercase filename")
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        path = self.output_dir / f"{slug}.md"
         provenance = json.dumps(draft["sources"], indent=2, sort_keys=True)
         document = f"# {brief['title']}\n\n{draft['markdown']}\n\n## Source provenance (fixture data)\n\n```json\n{provenance}\n```\n\n<!-- Local-only artifact. No external publishing occurred. -->\n"
-        try:
-            with path.open("x", encoding="utf-8") as artifact:
-                artifact.write(document)
-            created = True
-        except FileExistsError:
-            created = False
-        publication: dict[str, Json] = {"path": str(path), "created": created, "external_publish": False}
+        request = PublicationRequest("local/artifacts", f"{slug}.md", document, tuple(draft["sources"]), f"local-markdown:{brief['id']}:{slug}")
+        publication = self.publisher.publish(request)
+        self.memory.put(context.agent_id, _scope(context), "publication", publication)
+        return publication
+
+
+class ApprovedMarkdownPublisherTool:
+    """Capability-scoped publisher wrapper that binds approval, provenance, and target."""
+
+    capability = "publish.github_markdown"
+
+    def __init__(self, publisher: MarkdownPublisher, memory: MemoryStore, repository: str, path: str):
+        self.publisher, self.memory = publisher, memory
+        self.repository, self.path = repository, path
+
+    def invoke(self, value: Json, context: ToolContext) -> Json:
+        approval = _load(self.memory, context, "approval")
+        if not isinstance(approval, dict) or approval.get("decision") != "approved":
+            raise PermissionError("external Markdown publication requires explicit human approval")
+        draft = _load(self.memory, context, "draft")
+        assert isinstance(draft, dict)
+        brief, sources = draft["brief"], draft["sources"]
+        assert isinstance(brief, dict) and isinstance(sources, list)
+        document = f"# {brief['title']}\n\n{draft['markdown']}\n\n## Source provenance\n\n```json\n{json.dumps(sources, indent=2, sort_keys=True)}\n```\n"
+        request = PublicationRequest(
+            self.repository, self.path, document, tuple(sources),
+            f"github-markdown:{self.repository}:{self.path}:{brief['id']}",
+        )
+        publication = self.publisher.publish(request)
         self.memory.put(context.agent_id, _scope(context), "publication", publication)
         return publication
 
@@ -198,8 +199,56 @@ def build_workflow(brief: dict[str, str], source_ids: list[str], approval: Appro
     )
 
 
-def register_local_workflow(registry: CapabilityRegistry, memory: MemoryStore, fixtures: dict[str, SourceFixture], provider: Provider, output_dir: str | Path) -> None:
-    """Register narrowly scoped local agents and tools; publisher has no remote capability."""
+def build_https_workflow(brief: dict[str, str], source_ids: list[str], approval: ApprovalDecision) -> Workflow:
+    """Build the reviewed local-publish flow with an explicitly opt-in HTTPS collector."""
+    required = {"id", "title", "slug", "provider_prompt"}
+    missing = sorted(required - set(brief))
+    if missing:
+        raise ValueError(f"brief missing fields: {missing}")
+    publish_key = f"local-markdown:{brief['id']}:{brief['slug']}"
+    return Workflow(
+        "https-research-to-publish",
+        (
+            Node("collect", "collect_https_sources", "researcher", input={"brief": brief, "source_ids": source_ids}, delegation_cost=1),
+            Node("synthesize", "synthesize_draft", "writer", depends_on=("collect",), delegation_cost=1),
+            Node("review", "review_claims", "reviewer", depends_on=("synthesize",), delegation_cost=1),
+            Node("human_approval", "human_approval", "approver", depends_on=("review",), input={"decision": approval}, delegation_cost=1),
+            Node("publish", "publish_local_markdown", "publisher", depends_on=("human_approval",), idempotency_key=publish_key, delegation_cost=1),
+        ),
+        (Route("human_approval", "decision", "approved", {"approved": ("publish",), "rejected": ()}),),
+    )
+
+
+def build_github_markdown_workflow(brief: dict[str, str], source_ids: list[str], approval: ApprovalDecision, repository: str, path: str) -> Workflow:
+    """Build the same reviewed flow with a separately capability-scoped GitHub target."""
+    required = {"id", "title", "slug", "provider_prompt"}
+    missing = sorted(required - set(brief))
+    if missing:
+        raise ValueError(f"brief missing fields: {missing}")
+    publish_key = f"github-markdown:{repository}:{path}:{brief['id']}"
+    return Workflow(
+        "approved-github-markdown-publish",
+        (
+            Node("collect", "collect_sources", "researcher", input={"brief": brief, "source_ids": source_ids}, delegation_cost=1),
+            Node("synthesize", "synthesize_draft", "writer", depends_on=("collect",), delegation_cost=1),
+            Node("review", "review_claims", "reviewer", depends_on=("synthesize",), delegation_cost=1),
+            Node("human_approval", "human_approval", "approver", depends_on=("review",), input={"decision": approval}, delegation_cost=1),
+            Node("publish", "publish_github_markdown", "github_publisher", depends_on=("human_approval",), idempotency_key=publish_key, delegation_cost=1),
+        ),
+        (Route("human_approval", "decision", "approved", {"approved": ("publish",), "rejected": ()}),),
+    )
+
+
+def register_local_workflow(
+    registry: CapabilityRegistry,
+    memory: MemoryStore,
+    fixtures: dict[str, SourceFixture],
+    provider: Provider,
+    output_dir: str | Path,
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Register local agents and tools; dry-run retains approval flow but writes nothing."""
     registry.register_agent(AgentManifest("researcher", "1", frozenset({"research.collect.fixture"})))
     registry.register_agent(AgentManifest("writer", "1", frozenset({"draft.generate.deterministic"})))
     registry.register_agent(AgentManifest("reviewer", "1", frozenset({"review.claims"})))
@@ -209,4 +258,47 @@ def register_local_workflow(registry: CapabilityRegistry, memory: MemoryStore, f
     registry.register_tool("synthesize_draft", SynthesizeDraftTool(provider, memory))
     registry.register_tool("review_claims", ClaimReviewTool(memory))
     registry.register_tool("human_approval", HumanApprovalGateTool(memory))
+    publisher: MarkdownPublisher = DryRunMarkdownPublisher() if dry_run else LocalMarkdownPublisher(output_dir)
+    registry.register_tool("publish_local_markdown", LocalMarkdownPublisherTool(output_dir, memory, publisher))
+
+
+def register_https_workflow(
+    registry: CapabilityRegistry,
+    memory: MemoryStore,
+    sources: dict[str, HTTPSResearchSource],
+    provider: Provider,
+    output_dir: str | Path,
+    allowed_hosts: frozenset[str],
+    *,
+    connector: HTTPSResearchConnector | None = None,
+) -> None:
+    """Register the opt-in HTTPS source with a distinct capability and local publisher.
+
+    Callers must provide the source-ID mapping and an explicit host allowlist. The
+    connector can be injected for deterministic tests; no credentials are accepted.
+    """
+    research_connector = connector or HTTPSResearchConnector(sources, allowed_hosts)
+    registry.register_agent(AgentManifest("researcher", "1", frozenset({"research.collect.https"})))
+    registry.register_agent(AgentManifest("writer", "1", frozenset({"draft.generate.deterministic"})))
+    registry.register_agent(AgentManifest("reviewer", "1", frozenset({"review.claims"})))
+    registry.register_agent(AgentManifest("approver", "1", frozenset({"approval.human"})))
+    registry.register_agent(AgentManifest("publisher", "1", frozenset({"publish.local_markdown"})))
+    registry.register_tool("collect_https_sources", HTTPSCollectSourcesTool(research_connector, memory))
+    registry.register_tool("synthesize_draft", SynthesizeDraftTool(provider, memory))
+    registry.register_tool("review_claims", ClaimReviewTool(memory))
+    registry.register_tool("human_approval", HumanApprovalGateTool(memory))
     registry.register_tool("publish_local_markdown", LocalMarkdownPublisherTool(output_dir, memory))
+
+
+def register_github_markdown_workflow(registry: CapabilityRegistry, memory: MemoryStore, fixtures: dict[str, SourceFixture], provider: Provider, publisher: MarkdownPublisher, repository: str, path: str) -> None:
+    """Register an opt-in external adapter; caller owns client and credential injection."""
+    registry.register_agent(AgentManifest("researcher", "1", frozenset({"research.collect.fixture"})))
+    registry.register_agent(AgentManifest("writer", "1", frozenset({"draft.generate.deterministic"})))
+    registry.register_agent(AgentManifest("reviewer", "1", frozenset({"review.claims"})))
+    registry.register_agent(AgentManifest("approver", "1", frozenset({"approval.human"})))
+    registry.register_agent(AgentManifest("github_publisher", "1", frozenset({"publish.github_markdown"})))
+    registry.register_tool("collect_sources", CollectSourcesTool(FixtureSourceAdapter(fixtures), memory))
+    registry.register_tool("synthesize_draft", SynthesizeDraftTool(provider, memory))
+    registry.register_tool("review_claims", ClaimReviewTool(memory))
+    registry.register_tool("human_approval", HumanApprovalGateTool(memory))
+    registry.register_tool("publish_github_markdown", ApprovedMarkdownPublisherTool(publisher, memory, repository, path))

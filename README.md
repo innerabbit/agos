@@ -5,7 +5,7 @@
 AGOS is a small, dependency-free reference implementation—not a hosted platform. It validates serializable workflow graphs, invokes registered tools only through declared agent capabilities, and records local run state and events in SQLite.
 
 > [!IMPORTANT]
-> **Status — local vertical slice.** AGOS runs synchronously in one Python process. It has no HTTP API, queue, worker processes, live source fetching, external publishing, or remote connectors.
+> **Status — local vertical slice.** AGOS runs synchronously in one Python process. It has no HTTP API, queue, or worker processes. Fixture sources remain the default; an opt-in HTTPS research connector is available only through a separate capability, pre-registered source IDs, an explicit host allowlist, and a credential-free stdlib transport. Its opt-in GitHub Markdown publisher is an injected-client contract exercised only with deterministic fakes in this repository; it does not discover credentials or publish by itself.
 
 ## Who it is for
 
@@ -21,7 +21,7 @@ It is **not** a production deployment, distributed scheduler, multi-tenant platf
 | Execution | Synchronous, single-process runtime with delegation limits and cooperative cancellation | Queue, workers, leases, distributed cancellation |
 | Tool access | Agent manifests and capability checks before registered-tool invocation | Process isolation and sandboxing |
 | State and memory | In-memory adapters and local SQLite checkpoints, events, idempotency results, and namespaces | Postgres, object storage, multi-host coordination |
-| Research-to-Publish | Fixture-only sources, deterministic draft, provenance review, explicit approval input, local Markdown artifact | Live fetching, LLM clients, credential handling, remote publishing adapters |
+| Research-to-Publish | Fixture/fake sources by default; opt-in capability-scoped HTTPS retrieval with pre-registered IDs, exact host allowlist, public-IP validation, redirect revalidation, TLS-pinned stdlib transport, response/type caps, and digest provenance; deterministic draft, provenance review, explicit approval input, idempotent local Markdown artifact, and capability-scoped injected GitHub Markdown adapter | LLM clients, built-in credential handling, HTTP API, production connector |
 | Operations | Local CLI and Docker/Compose tooling for tests | HTTP API, remote telemetry, production topology |
 
 Planned items are not available through configuration flags. See the [roadmap](docs/ROADMAP.md) for scope and priorities.
@@ -48,6 +48,16 @@ PYTHONPATH=src python3 -m agos.cli research-to-publish-demo --reject --output-di
 
 That run skips the publisher and creates no artifact. For installation options, file-backed state, and expected output, read [Getting started](docs/GETTING_STARTED.md).
 
+To exercise the approved route without creating an artifact, use the no-effect
+dry-run publisher:
+
+```sh
+PYTHONPATH=src python3 -m agos.cli research-to-publish-demo --dry-run --output-dir /tmp/agos-demo
+```
+
+The dry-run receipt reports `target: "dry-run"`; it makes no network calls,
+does not publish externally, and writes no file.
+
 ## Canonical Research-to-Publish flow
 
 ```mermaid
@@ -66,6 +76,8 @@ The workflow is deliberately narrow:
 3. Claim review prevents approval if a claim refers to an uncollected source ID.
 4. `HumanApprovalGateTool` consumes an explicit `approved` or `rejected` workflow input; there is no interactive approval service.
 5. `LocalMarkdownPublisherTool` creates one Markdown file beneath a caller-selected directory and reports `external_publish: false`.
+6. `HTTPSResearchConnector` is opt-in: a separate `research.collect.https` capability, pre-registered source IDs, exact HTTPS host allowlist, DNS validation that rejects non-public addresses, redirect revalidation, bounded credential-free TLS-pinned transport, content-type allowlist, and SHA-256 provenance are required. Fixture workflows retain `research.collect.fixture` and never fetch.
+7. `GitHubMarkdownPublisher` is opt-in: a separate `publish.github_markdown` capability, approved workflow route, repository allowlist, path validation, injected credential source, and injected GitHub client are all required. AGOS ships no live client and tests use a deterministic fake only.
 
 ## Architecture at a glance
 
@@ -87,7 +99,8 @@ The runtime checks an active agent's declared capability before each registered-
 
 ```text
 src/agos/                 Runtime, schema, registry, local persistence, and CLI
-src/agos/research_to_publish.py  Canonical fixture-only workflow
+src/agos/research_to_publish.py  Fixture-default and opt-in HTTPS Research-to-Publish workflows
+src/agos/sources.py              Fixture connectors and secure HTTPS source connector
 tests/                    Unit tests for runtime and canonical workflow
 examples/                 Small local workflow examples
 docs/                     Getting started, roadmap, and architecture decisions
@@ -105,6 +118,9 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 # Run the canonical demo from source
 PYTHONPATH=src python3 -m agos.cli research-to-publish-demo --output-dir /tmp/agos-demo
 
+# Exercise the approved route without creating a file or external effect
+PYTHONPATH=src python3 -m agos.cli research-to-publish-demo --dry-run --output-dir /tmp/agos-demo
+
 # Optional: run the local test container (Docker required)
 docker compose -f deploy/compose.yaml run --rm agos-tests
 ```
@@ -121,12 +137,14 @@ PYTHONPATH=src python3 -m agos.cli events ./data/agos-state.db RUN_ID
 - [Architecture](ARCHITECTURE.md) — modules, execution semantics, persistence, and security limits.
 - [Roadmap](docs/ROADMAP.md) — current surface versus planned work.
 - [Deployment boundaries](DEPLOYMENT.md) — local tooling and production prerequisites.
+- [Testing and evaluation](docs/TESTING.md) — reproducible local checks and their limits.
+- [Original MVP release checklist](docs/RELEASE_CHECKLIST.md) — release evidence versus production requirements.
 - [ADR 0001](docs/adr/0001-local-first-deployment-boundaries.md) — why unsupported backends are rejected.
 - [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ## Roadmap
 
-Near-term work is deliberately focused on hardening boundaries before scale: manifest/version policy, secret references, audit/data-retention behavior, and isolation for untrusted tools. Service APIs, workers, remote telemetry, and external publishing adapters remain planned only. See the detailed [roadmap](docs/ROADMAP.md).
+The HTTPS connector is intentionally narrow: exact host allowlists (no wildcards), port 443 only, GET only, UTF-8 `text/plain`, `text/html`, or `application/json`, 5-second default timeout, 1 MiB cap, and up to three redirects. It sends no credentials, cookies, or caller headers. Service APIs, workers, remote telemetry, and production external publishing clients remain planned only; the GitHub adapter here is a fake-tested, dependency-injected contract rather than a live client. See the detailed [roadmap](docs/ROADMAP.md).
 
 ## Security
 

@@ -8,7 +8,7 @@ This roadmap separates the current local vertical slice from possible future wor
 - Synchronous single-process execution with retries, cooperative timeout/cancellation behavior, delegation bounds, and local idempotency-result reuse.
 - Capability-scoped tool dispatch and agent lifecycle checks.
 - Local SQLite checkpoints/events and local SQLite or in-memory memory stores.
-- Fixture-only Research-to-Publish demo with provenance review, explicit approval input, and idempotent local Markdown output.
+- Fixture/fake-default Research-to-Publish demo with strict source allowlists, provenance review, explicit approval input, and idempotent local Markdown output. An opt-in `research.collect.https` source uses pre-registered IDs, exact HTTPS host allowlists, public-IP and redirect validation, TLS-pinned stdlib transport, response/type caps, and digest provenance; tests inject fakes and make no live web requests. The injected GitHub Markdown adapter is also fake-tested.
 - Local CLI utilities and optional Docker Compose test/event tooling.
 
 ## Planned: hardening foundations
@@ -28,10 +28,10 @@ This roadmap separates the current local vertical slice from possible future wor
 
 ## Planned: opt-in external effects
 
-- Separately registered adapters for Notion, X, WordPress, or other publishing targets.
-- Explicit egress controls, target allow-lists, secret references, idempotency/retry behavior, audit events, and a final human approval tied to the draft and target.
+- Production implementations for Notion, X, WordPress, or other publishing targets.
+- A production GitHub client with explicit egress controls, secret references, ambiguous-outcome recovery, audit retention, and an approval record cryptographically bound to draft and target.
 
-None of these integrations exist today. The implemented canonical workflow accepts deterministic fixtures only and publishes only a local Markdown file.
+The implemented canonical workflow keeps deterministic fixtures as its default and publishes locally. HTTPS retrieval is separately opt-in and has no credential behavior; the connector uses a bounded stdlib transport while tests inject fakes. The optional GitHub-shaped adapter is a dependency-injected contract with no bundled credential source; its tests use fakes only.
 
 ## Non-goals of the current vertical slice
 

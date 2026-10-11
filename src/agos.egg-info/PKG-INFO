@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: agos
+Version: 0.1.0
+Summary: Local, workflow-first agent orchestration vertical slice
+Requires-Python: >=3.11

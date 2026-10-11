@@ -17,7 +17,7 @@ From the repository root:
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-The tests cover workflow validation, retries, routes, capabilities, delegation bounds, local memory/state, the approved artifact path, rejection, and invalid provenance claims.
+The tests cover workflow validation, retries, routes, capabilities, delegation bounds, local memory/state, approved/rejected artifacts, invalid provenance claims, and GitHub Markdown adapter denial/approval/idempotency using deterministic fakes only. HTTPS research tests inject fake transports and resolvers; they never access the web.
 
 ## Run the canonical demo
 
@@ -31,7 +31,7 @@ Expected behavior:
 - It creates `/tmp/agos-demo/local-workflow-demo.md`.
 - The Markdown contains fixture provenance and states that no external publishing occurred.
 
-The demo uses one supplied `SourceFixture` and `DeterministicProvider`; it never fetches a URL or calls an LLM.
+The demo uses one supplied `SourceFixture` and `DeterministicProvider`; it never fetches a URL or calls an LLM. `SourceConnector` implementations in this MVP are strict allowlisted fixture/fake contracts only.
 
 Run the rejected path:
 
@@ -62,6 +62,12 @@ AGOS_EXECUTION_BACKEND=local
 ```
 
 `Settings.from_env()` rejects unsupported backend values such as Postgres or queue rather than silently falling back. `AGOS_ENV` accepts `local`, `staging`, or `production` as labels, but changing that label does not create a staging or production topology.
+
+## Opt-in GitHub Markdown adapter
+
+`HTTPSResearchConnector` is an opt-in library seam, not a CLI feature. Register it through `register_https_workflow()` with pre-registered `HTTPSResearchSource` values and a non-empty exact host allowlist. The connector requires `research.collect.https` rather than the fixture capability, permits HTTPS port 443 only, resolves every initial and redirect host before fetch, rejects private/loopback/link-local/reserved/multicast destinations (and mixed DNS answers), pins the validated IP for TLS, caps each response at 1 MiB by default, and accepts only UTF-8 `text/plain`, `text/html`, or `application/json`. It has no credential, cookie, or caller-header API. Its record includes normalized final URL, UTC retrieval time, and `sha256:` digest. Keep the fixture workflow as the default; inject a fake transport and resolver for deterministic tests.
+
+`GitHubMarkdownPublisher` is a library seam, not a CLI feature. Register it through `register_github_markdown_workflow()` only with an injected `GitHubContentsClient`, injected `CredentialSource`, and explicit repository allowlist. It rejects non-allowlisted repositories and unsafe/non-Markdown paths, and the workflow only reaches it after the existing approval gate. AGOS has no built-in token lookup; repository tests use a fake client and fake credential source.
 
 ## Next steps
 

@@ -8,7 +8,7 @@
     "state_and_memory": "local SQLite implementations plus in-memory test adapters",
     "execution_backend": "synchronous LocalExecutionBackend",
     "configuration": "validated environment settings for implemented local backends",
-    "research_to_publish_mvp": "fixture-only source collection, provenance, deterministic draft and claim review, explicit human approval route, and idempotent local Markdown artifacts",
+    "research_to_publish_mvp": "fixture/fake sources remain the default; opt-in research.collect.https uses pre-registered source IDs, exact HTTPS host allowlists, public-IP and redirect revalidation, DNS-pinned stdlib TLS, timeout/byte/type limits, and normalized URL/timestamp/SHA-256 provenance. The deterministic draft, claim review, explicit human approval, local Markdown artifacts, and opt-in GitHub publisher seams remain unchanged", 
     "demo": "agos research-to-publish-demo; it performs no network access or external publishing",
     "container_template": "local CLI/test image only"
   },
@@ -19,12 +19,12 @@
     "object_storage": "planned",
     "distributed_cancellation": "planned",
     "remote_telemetry_export": "planned",
-    "notion_x_wordpress_publish_adapters": "planned; require explicit capability, credentials, egress controls, and human authorization",
+    "production_github_client_and_other_publish_adapters": "planned; require explicit egress controls, secret references, ambiguous-outcome recovery, audit retention, and human authorization", 
     "production_deployment": "planned"
   },
   "limitations": [
-    "No HTTP API, scheduler, queue, remote workers, external source fetching, or external publishing is implemented.",
-    "The canonical source adapter accepts deterministic fixtures only; it does not scrape or live-fetch.",
+    "No HTTP API, scheduler, queue, remote workers, credential lookup, or general-purpose network client is implemented. The opt-in HTTPS research connector is the only bundled live retrieval path and is capability/allowlist constrained; the GitHub Markdown adapter is an injected interface exercised with fakes only.",
+    "Source connectors are fixture/fake by default. Opt-in HTTPS research accepts only exact allowlisted hosts and pre-registered IDs; it rejects non-public destinations and revalidates redirects, uses no credentials/cookies, and is fake-tested without live web access.",
     "Human approval is represented by an explicit workflow input in this local MVP; no interactive approval service is implemented.",
     "SQLite is single-host storage and does not make tool side effects transactional or provide distributed exactly-once recovery.",
     "The supplied container manifest is for local tooling, not a production topology."
