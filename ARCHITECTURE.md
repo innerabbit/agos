@@ -36,6 +36,7 @@ schema ──> storage <── runtime ──> registry/providers/memory
 | `publishing.py` | Markdown publication boundary | Request validation, dry-run/local adapters, and injected GitHub client/credential contracts. |
 | `config.py` | Environment-derived local settings | Validates SQLite state/memory and local execution only. |
 | `api.py` | Local demo HTTP boundary | Stdlib localhost-only API for fixed demo state, explicit review actions, dry-run receipts, and server-lifetime append-only history. |
+| `agency.py` | Agency-beta domain boundary | Offline local fixtures for explicit workspace membership/roles plus JSONL append-only, hash-chained workspace audit events. A Postgres-shaped adapter validates configuration then fails closed without importing a driver or opening a connection. |
 
 ## Workflow and execution contract
 
@@ -111,6 +112,24 @@ The files under `deploy/` build an image for the CLI/tests and provide optional 
 `agos serve` binds to `127.0.0.1:8765` by default and refuses non-loopback bind addresses before it opens a socket. It exposes only fixed deterministic demo data: `GET /healthz`, `GET /v1/demo`, `POST /v1/demo/review/approve`, `POST /v1/demo/review/reject`, `POST /v1/demo/dry-run`, and `GET /v1/demo/history`. Review actions require an exact empty JSON object; dry-run requires a preceding explicit approval.
 
 The API constructs its own fixture and deterministic-provider inputs. It accepts no credentials, URLs, output directories, arbitrary workflow definitions, or publishing options. Dry-run registers only `DryRunMarkdownPublisher`, so it writes no artifact and has no network or external-publication effect. With `--data-dir`, ordered activity is appended locally as JSONL and is retained across restarts; it remains a local development feed, not an audit-retention system.
+
+## Agency-beta boundary (not hosted)
+
+`agency.py` adds a separate domain seam for a future multi-workspace service.
+`LocalAgencyFixtures` deliberately provides only non-secret development
+identities and fixed memberships: roles are `owner`, `admin`, `member`, and
+`viewer`; unknown users and cross-workspace access are denied. `AgencyService`
+checks membership before listing workspace audit history or recording a review.
+The JSONL audit store creates immutable snapshots for callers, uses a sequence
+per workspace, and validates a previous-hash chain during replay. It detects
+local log tampering or gaps but is not a substitute for managed audit retention.
+
+`PostgresAgencyStore` is intentionally unconfigured. It validates that a
+`DATABASE_URL` was supplied and raises for every operation without installing a
+driver or attempting a connection. `HostedAgencySettings` requires
+`DATABASE_URL`, `AGOS_SIGNING_SECRET`, and explicit `AGOS_ALLOWED_ORIGINS`;
+validation alone does not make hosting complete. See `DEPLOYMENT.md` for exact
+requirements. These additions do not enable live publishing or external fetch.
 
 The handler caps request bodies at 8 KiB, requires JSON for POST actions, rejects non-empty/unknown schemas, avoids request logging, sends `nosniff` and no-store headers, and applies CORS only to `http://127.0.0.1:3000` (Studio) or the same API port, without credentials. Originless same-machine CLI requests remain supported; non-loopback browser origins are rejected.
 

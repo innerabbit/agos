@@ -65,6 +65,32 @@ never committed in `.env`, images, workflow manifests, event records, or logs.
 A future production configuration should contain secret *references*, not
 credential values.
 
+### Agency beta hosting boundary (not deployed)
+
+The repository now defines a **validated configuration boundary** for a future
+hosted agency service. It does not provision infrastructure, install a Postgres
+driver, connect to a database, expose a network listener, or authenticate real
+users. `HostedAgencySettings.from_env()` fails closed unless all of the
+following are supplied by the deployment platform:
+
+- `DATABASE_URL`: a `postgres://` or `postgresql://` URL for the managed
+  database. The bundled Postgres adapter deliberately raises before any driver
+  import or connection attempt; migrations and a real repository are still
+  required.
+- `AGOS_SIGNING_SECRET`: a non-empty secret of at least 32 characters supplied
+  through the platform's secret manager. Never commit it, add it to `.env`, or
+  write it to audit records.
+- `AGOS_ALLOWED_ORIGINS`: a comma-separated allowlist of explicit browser
+  origins, with no wildcard. Use production HTTPS origins; loopback origins are
+  accepted only for local integration development.
+
+The agency domain has local JSONL persistence, hash-chained per-workspace audit
+events, and explicit non-secret local fixture identities/memberships solely for
+offline development. JSONL is not a hosted audit-retention or database
+solution. Hosting remains incomplete until real authentication, Postgres
+migrations/transactions, origin enforcement at an API boundary, key rotation,
+and operational controls are implemented and reviewed.
+
 ## Telemetry and operations (planned)
 Instrument API admission, queue latency, lease loss, workflow/node status,
 retries, deadline/cancellation, database failures, and tool runner exits.

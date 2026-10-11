@@ -61,3 +61,36 @@ class Settings:
             memory_db_path=Path(_value(source, "AGOS_MEMORY_DB_PATH", "./data/agos-memory.db")),
             telemetry_mode=_value(source, "AGOS_TELEMETRY_MODE", "logging"),  # type: ignore[arg-type]
         )
+
+
+@dataclass(frozen=True)
+class HostedAgencySettings:
+    """Configuration validation for a future hosted agency deployment.
+
+    Validation is intentionally separate from ``Settings`` so local workflows
+    remain local-only.  Passing validation does not enable hosting: the
+    Postgres adapter is deliberately unconfigured and fail-closed.
+    """
+    database_url: str
+    signing_secret: str
+    allowed_origins: tuple[str, ...]
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "HostedAgencySettings":
+        source = os.environ if env is None else env
+        database_url = source.get("DATABASE_URL", "").strip()
+        signing_secret = source.get("AGOS_SIGNING_SECRET", "").strip()
+        origins = tuple(origin.strip() for origin in source.get("AGOS_ALLOWED_ORIGINS", "").split(",") if origin.strip())
+        if not database_url:
+            raise ConfigurationError("DATABASE_URL is required for hosted agency configuration")
+        if not (database_url.startswith("postgres://") or database_url.startswith("postgresql://")):
+            raise ConfigurationError("DATABASE_URL must use a postgres or postgresql URL")
+        if not signing_secret:
+            raise ConfigurationError("AGOS_SIGNING_SECRET is required for hosted agency configuration")
+        if len(signing_secret) < 32:
+            raise ConfigurationError("AGOS_SIGNING_SECRET must be at least 32 characters")
+        if not origins:
+            raise ConfigurationError("AGOS_ALLOWED_ORIGINS must contain at least one explicit origin")
+        if any("*" in origin or not origin.startswith(("https://", "http://localhost:", "http://127.0.0.1:")) for origin in origins):
+            raise ConfigurationError("AGOS_ALLOWED_ORIGINS must contain explicit http(s) origins without wildcards")
+        return cls(database_url, signing_secret, origins)
